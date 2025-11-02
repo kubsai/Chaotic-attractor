@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chaotic Attractors Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        .control-panel {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+        }
+        .slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            border-radius: 5px;
+            background: #444;
+            outline: none;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+        .slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+        .attractor-btn {
+            transition: all 0.3s;
+        }
+        .attractor-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-black">
+    <div id="container"></div>
+    
+    <!-- Control Panel -->
+    <div class="control-panel fixed top-4 left-4 text-white p-6 rounded-lg shadow-2xl max-w-sm z-10">
+        <h1 class="text-2xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+            Chaotic Attractors
+        </h1>
+        
+        <div class="mb-4">
+            <h2 class="text-sm font-semibold mb-2 text-gray-300">Select Attractor</h2>
+            <div class="grid grid-cols-2 gap-2">
+                <button class="attractor-btn active px-4 py-2 bg-gray-700 rounded hover:bg-gray-600" data-attractor="lorenz">
+                    Lorenz
+                </button>
+                <button class="attractor-btn px-4 py-2 bg-gray-700 rounded hover:bg-gray-600" data-attractor="rossler">
+                    Rössler
+                </button>
+                <button class="attractor-btn px-4 py-2 bg-gray-700 rounded hover:bg-gray-600" data-attractor="thomas">
+                    Thomas
+                </button>
+                <button class="attractor-btn px-4 py-2 bg-gray-700 rounded hover:bg-gray-600" data-attractor="aizawa">
+                    Aizawa
+                </button>
+            </div>
+        </div>
+        
+        <div class="mb-4">
+            <label class="text-sm text-gray-300 block mb-2">
+                Speed: <span id="speedValue">1.0</span>
+            </label>
+            <input type="range" class="slider" id="speed" min="0.1" max="3" step="0.1" value="1">
+        </div>
+        
+        <div class="mb-4">
+            <label class="text-sm text-gray-300 block mb-2">
+                Trail Length: <span id="trailValue">5000</span>
+            </label>
+            <input type="range" class="slider" id="trail" min="1000" max="20000" step="1000" value="5000">
+        </div>
+        
+        <div class="mb-4">
+            <label class="text-sm text-gray-300 block mb-2">
+                Particle Count: <span id="particleValue">3</span>
+            </label>
+            <input type="range" class="slider" id="particles" min="1" max="10" step="1" value="3">
+        </div>
+        
+        <button id="reset" class="w-full px-4 py-2 bg-gradient-to-r from-red-500 to-pink-500 rounded hover:from-red-600 hover:to-pink-600 font-semibold">
+            Reset View
+        </button>
+        
+        <div class="mt-4 text-xs text-gray-400">
+            <p>🖱️ Drag to rotate</p>
+            <p>🔍 Scroll to zoom</p>
+            <p>⌨️ Right-click + drag to pan</p>
+        </div>
+    </div>
+
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+        scene.fog = new THREE.Fog(0x000000, 50, 200);
+
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.set(0, 0, 50);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 10;
+        controls.maxDistance = 150;
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const pointLight1 = new THREE.PointLight(0x4444ff, 1, 100);
+        pointLight1.position.set(50, 50, 50);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0xff4444, 1, 100);
+        pointLight2.position.set(-50, -50, -50);
+        scene.add(pointLight2);
+
+        // Attractor parameters and functions
+        const attractors = {
+            lorenz: {
+                params: { sigma: 10, rho: 28, beta: 8/3 },
+                scale: 2,
+                init: () => ({ x: 0.1, y: 0, z: 0 }),
+                step: function(p, dt) {
+                    const dx = this.params.sigma * (p.y - p.x);
+                    const dy = p.x * (this.params.rho - p.z) - p.y;
+                    const dz = p.x * p.y - this.params.beta * p.z;
+                    return {
+                        x: p.x + dx * dt,
+                        y: p.y + dy * dt,
+                        z: p.z + dz * dt
+                    };
+                }
+            },
+            rossler: {
+                params: { a: 0.2, b: 0.2, c: 5.7 },
+                scale: 5,
+                init: () => ({ x: 0.1, y: 0, z: 0 }),
+                step: function(p, dt) {
+                    const dx = -p.y - p.z;
+                    const dy = p.x + this.params.a * p.y;
+                    const dz = this.params.b + p.z * (p.x - this.params.c);
+                    return {
+                        x: p.x + dx * dt,
+                        y: p.y + dy * dt,
+                        z: p.z + dz * dt
+                    };
+                }
+            },
+            thomas: {
+                params: { b: 0.208186 },
+                scale: 15,
+                init: () => ({ x: 0.1, y: 0, z: 0 }),
+                step: function(p, dt) {
+                    const dx = Math.sin(p.y) - this.params.b * p.x;
+                    const dy = Math.sin(p.z) - this.params.b * p.y;
+                    const dz = Math.sin(p.x) - this.params.b * p.z;
+                    return {
+                        x: p.x + dx * dt,
+                        y: p.y + dy * dt,
+                        z: p.z + dz * dt
+                    };
+                }
+            },
+            aizawa: {
+                params: { a: 0.95, b: 0.7, c: 0.6, d: 3.5, e: 0.25, f: 0.1 },
+                scale: 15,
+                init: () => ({ x: 0.1, y: 0, z: 0 }),
+                step: function(p, dt) {
+                    const dx = (p.z - this.params.b) * p.x - this.params.d * p.y;
+                    const dy = this.params.d * p.x + (p.z - this.params.b) * p.y;
+                    const dz = this.params.c + this.params.a * p.z - 
+                              (p.z * p.z * p.z) / 3 - 
+                              (p.x * p.x + p.y * p.y) * (1 + this.params.e * p.z) + 
+                              this.params.f * p.z * p.x * p.x * p.x;
+                    return {
+                        x: p.x + dx * dt,
+                        y: p.y + dy * dt,
+                        z: p.z + dz * dt
+                    };
+                }
+            }
+        };
+
+        // State
+        let currentAttractor = 'lorenz';
+        let speed = 1.0;
+        let maxPoints = 5000;
+        let particleCount = 3;
+        let particles = [];
+
+        class Particle {
+            constructor(attractor, offset) {
+                this.attractor = attractor;
+                this.position = attractors[attractor].init();
+                this.position.x += offset.x;
+                this.position.y += offset.y;
+                this.position.z += offset.z;
+                this.points = [];
+                this.geometry = new THREE.BufferGeometry();
+                
+                const material = new THREE.LineBasicMaterial({
+                    vertexColors: true,
+                    linewidth: 2,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                this.line = new THREE.Line(this.geometry, material);
+                scene.add(this.line);
+            }
+
+            update(dt) {
+                const attr = attractors[this.attractor];
+                this.position = attr.step(this.position, dt);
+                
+                this.points.push({
+                    x: this.position.x * attr.scale,
+                    y: this.position.y * attr.scale,
+                    z: this.position.z * attr.scale
+                });
+                
+                if (this.points.length > maxPoints) {
+                    this.points.shift();
+                }
+                
+                this.updateGeometry();
+            }
+
+            updateGeometry() {
+                const positions = new Float32Array(this.points.length * 3);
+                const colors = new Float32Array(this.points.length * 3);
+                
+                for (let i = 0; i < this.points.length; i++) {
+                    positions[i * 3] = this.points[i].x;
+                    positions[i * 3 + 1] = this.points[i].y;
+                    positions[i * 3 + 2] = this.points[i].z;
+                    
+                    // Color gradient based on position in trail
+                    const t = i / this.points.length;
+                    const hue = (t * 0.8 + 0.5) % 1;
+                    const color = new THREE.Color();
+                    color.setHSL(hue, 1, 0.5 + t * 0.3);
+                    
+                    colors[i * 3] = color.r;
+                    colors[i * 3 + 1] = color.g;
+                    colors[i * 3 + 2] = color.b;
+                }
+                
+                this.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                this.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            }
+
+            dispose() {
+                scene.remove(this.line);
+                this.geometry.dispose();
+                this.line.material.dispose();
+            }
+
+            changeAttractor(newAttractor) {
+                this.attractor = newAttractor;
+                this.position = attractors[newAttractor].init();
+                this.points = [];
+            }
+        }
+
+        function initParticles() {
+            particles.forEach(p => p.dispose());
+            particles = [];
+            
+            for (let i = 0; i < particleCount; i++) {
+                const offset = {
+                    x: (Math.random() - 0.5) * 0.2,
+                    y: (Math.random() - 0.5) * 0.2,
+                    z: (Math.random() - 0.5) * 0.2
+                };
+                particles.push(new Particle(currentAttractor, offset));
+            }
+        }
+
+        // UI Controls
+        document.querySelectorAll('.attractor-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.attractor-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentAttractor = btn.dataset.attractor;
+                particles.forEach(p => p.changeAttractor(currentAttractor));
+            });
+        });
+
+        document.getElementById('speed').addEventListener('input', (e) => {
+            speed = parseFloat(e.target.value);
+            document.getElementById('speedValue').textContent = speed.toFixed(1);
+        });
+
+        document.getElementById('trail').addEventListener('input', (e) => {
+            maxPoints = parseInt(e.target.value);
+            document.getElementById('trailValue').textContent = maxPoints;
+        });
+
+        document.getElementById('particles').addEventListener('input', (e) => {
+            particleCount = parseInt(e.target.value);
+            document.getElementById('particleValue').textContent = particleCount;
+            initParticles();
+        });
+
+        document.getElementById('reset').addEventListener('click', () => {
+            camera.position.set(0, 0, 50);
+            controls.reset();
+            initParticles();
+        });
+
+        // Animation
+        initParticles();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const dt = 0.005 * speed;
+            particles.forEach(p => p.update(dt));
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
